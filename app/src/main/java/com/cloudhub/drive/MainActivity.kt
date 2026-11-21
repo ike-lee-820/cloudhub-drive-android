@@ -1,15 +1,17 @@
 package com.cloudhub.drive
 
 import android.os.Bundle
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -25,9 +27,9 @@ import coil.compose.AsyncImage
 import com.cloudhub.drive.core.AppGraph
 import com.cloudhub.drive.core.DriveApp
 import com.cloudhub.drive.core.Node
-import com.cloudhub.drive.core.Util
 import com.cloudhub.drive.core.UpdateInfo
 import com.cloudhub.drive.core.Updater
+import com.cloudhub.drive.core.Util
 import com.cloudhub.drive.ui.AppBottomBar
 import com.cloudhub.drive.ui.CloudHubTheme
 import com.cloudhub.drive.ui.FilesScreen
@@ -39,6 +41,7 @@ import com.cloudhub.drive.ui.TasksScreen
 import com.cloudhub.drive.ui.UpdateDialog
 import com.cloudhub.drive.ui.WebPageScreen
 import com.cloudhub.drive.ui.appBackground
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 data class PreviewArgs(val node: Node, val editable: Boolean)
@@ -47,11 +50,46 @@ data class WebArgs(val url: String, val title: String)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 上次启动若崩溃，用纯 View 显示日志，完全绕开 Compose，
+        // 保证即使 Compose 自身有问题也能看到堆栈。
+        val last = runCatching { DriveApp.instance.crashLog() }.getOrDefault("")
+        if (last.isNotBlank()) {
+            showCrashFallback(last)
+            return
+        }
+
         setContent {
             CloudHubTheme {
                 RootShell()
             }
         }
+    }
+
+    private fun showCrashFallback(text: String) {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(android.graphics.Color.rgb(242, 242, 247))
+        }
+        val scroll = ScrollView(this)
+        val tv = TextView(this).apply {
+            this.text = text
+            textSize = 12f
+            setTextColor(android.graphics.Color.rgb(28, 28, 30))
+            setPadding(24, 24, 24, 24)
+        }
+        scroll.addView(tv, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        val btn = Button(this).apply {
+            this.text = "复制并清除日志，重新进入"
+            setOnClickListener {
+                Util.copy(this@MainActivity, "崩溃日志", text)
+                DriveApp.instance.clearCrashLog()
+                recreate()
+            }
+        }
+        root.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        setContentView(root)
     }
 }
 
@@ -70,7 +108,6 @@ private fun RootShell() {
     var showUpdate by remember { mutableStateOf(false) }
     var checkingUpdate by remember { mutableStateOf(false) }
     var updateMessage by remember { mutableStateOf("") }
-    var crashText by remember { mutableStateOf(DriveApp.instance.crashLog()) }
 
     fun checkUpdate(manual: Boolean) {
         if (checkingUpdate) return
@@ -94,8 +131,12 @@ private fun RootShell() {
         }
     }
 
+    // 更新检查延后到界面稳定之后，避免参与启动链路
     LaunchedEffect(authed) {
-        if (authed) runCatching { checkUpdate(false) }
+        if (authed) {
+            delay(1500)
+            runCatching { checkUpdate(false) }
+        }
     }
 
     Box(Modifier.fillMaxSize().then(appBackground(s))) {
@@ -155,33 +196,5 @@ private fun RootShell() {
         updateInfo?.let { info ->
             UpdateDialog(info = info, onDismiss = { showUpdate = false })
         }
-    }
-
-    if (crashText.isNotBlank()) {
-        val ctx = androidx.compose.ui.platform.LocalContext.current
-        AlertDialog(
-            onDismissRequest = { crashText = "" },
-            title = { Text("上次启动异常") },
-            text = {
-                androidx.compose.foundation.lazy.LazyColumn {
-                    item {
-                        Text(crashText.take(4000), style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    Util.copy(ctx, "崩溃日志", crashText)
-                    DriveApp.instance.clearCrashLog()
-                    crashText = ""
-                }) { Text("复制并清除") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    DriveApp.instance.clearCrashLog()
-                    crashText = ""
-                }) { Text("忽略") }
-            }
-        )
     }
 }

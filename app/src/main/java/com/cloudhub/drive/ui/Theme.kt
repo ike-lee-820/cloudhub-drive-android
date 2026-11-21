@@ -1,6 +1,5 @@
 package com.cloudhub.drive.ui
 
-import android.app.Activity
 import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.graphics.Typeface
@@ -10,7 +9,6 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -18,11 +16,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
-import androidx.core.view.WindowCompat
 import com.cloudhub.drive.core.AppGraph
 import com.cloudhub.drive.core.AppSettings
 import kotlinx.coroutines.Dispatchers
@@ -113,24 +108,6 @@ fun CloudHubTheme(content: @Composable () -> Unit) {
     val typography = remember(typeface) {
         val tf = typeface ?: return@remember Typography()
         Typography().withFamily(FontFamily(tf))
-    }
-
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            // view.context 可能是 ContextThemeWrapper，不能直接强转 Activity
-            runCatching {
-                var c = view.context
-                while (c is android.content.ContextWrapper && c !is Activity) {
-                    c = c.baseContext
-                }
-                if (c is Activity) {
-                    val window = c.window
-                    window.statusBarColor = Color.Transparent.toArgb()
-                    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
-                }
-            }
-        }
     }
 
     MaterialTheme(

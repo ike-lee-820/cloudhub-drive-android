@@ -2,6 +2,7 @@ package com.cloudhub.drive.core
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
 import java.io.File
@@ -43,24 +44,28 @@ class DriveApp : Application() {
     lateinit var store: Store
         private set
 
+    // attachBaseContext 早于 ContentProvider 安装与 Application.onCreate，
+    // 在这里装处理器才能捕获启动最早期的崩溃。
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        installCrashHandler()
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         store = Store(this)
-        installCrashHandler()
     }
 
     private fun installCrashHandler() {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
-            runCatching {
-                val sw = StringWriter()
-                error.printStackTrace(PrintWriter(sw))
-                File(filesDir, "crash.log").writeText(
-                    "thread=" + thread.name + "\ntime=" + System.currentTimeMillis() +
-                        "\n" + sw.toString()
-                )
-            }
+            val sw = StringWriter()
+            error.printStackTrace(PrintWriter(sw))
+            val text = "thread=" + thread.name + "\ntime=" + System.currentTimeMillis() +
+                "\n" + sw.toString()
+            Log.e("CloudHubCrash", text)
+            runCatching { File(filesDir, "crash.log").writeText(text) }
             previous?.uncaughtException(thread, error)
         }
     }

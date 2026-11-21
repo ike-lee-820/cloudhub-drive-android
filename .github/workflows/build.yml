@@ -106,6 +106,13 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Startup smoke test (diagnostic)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --tests '*StartupSmokeTest*' --no-daemon --stacktrace 2>&1 | tee smoke.log
+
       - name: Assemble signed release APK
         env:
           APP_VERSION_NAME: ${{ steps.ver.outputs.version }}
@@ -124,6 +131,30 @@ jobs:
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
           cp "$APK" "dist/CloudHubDrive-${{ steps.ver.outputs.version }}-release.apk"
           ls -l dist
+
+      - name: Dump merged manifest and APK entries
+        run: |
+          {
+            find app/build/intermediates/merged_manifests app/build/intermediates/merged_manifest \
+                 -name AndroidManifest.xml 2>/dev/null | while read -r f; do
+              echo "===== $f ====="; cat "$f"
+            done
+          } > manifest.log
+          python3 - <<'PY' > apk_entries.log
+          import glob, zipfile
+          for p in glob.glob("dist/*.apk"):
+              with zipfile.ZipFile(p) as z:
+                  names = z.namelist()
+                  print("apk:", p, "entries:", len(names))
+                  print("has AndroidManifest.xml:", "AndroidManifest.xml" in names)
+                  print("has resources.arsc:", "resources.arsc" in names)
+                  print("dex files:", [n for n in names if n.endswith(".dex")])
+                  print("classes present (sample):")
+                  for n in names[:40]:
+                      print(" ", n)
+          PY
+          cat manifest.log
+          head -50 apk_entries.log
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -156,8 +187,39 @@ jobs:
             probe.log
             sdk.log
             sdk-licenses.log
+            smoke.log
             build.log
+            manifest.log
+            apk_entries.log
           if-no-files-found: ignore
+
+      - name: Publish startup diagnostics
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          parts = []
+          smoke = Path("smoke.log")
+          if smoke.exists():
+              lines = smoke.read_text(errors="replace").splitlines()
+              keys = ("Exception", "Caused by:", "at com.cloudhub", "FAILED",
+                      "tests completed", "BUILD ", "Error", "error:", "java.lang")
+              hits = sorted({j for i, l in enumerate(lines)
+                             if any(k in l for k in keys)
+                             for j in range(max(0, i - 1), min(len(lines), i + 2))})
+              parts.append("===== smoke.log =====" + "\n" +
+                           "\n".join(lines[i][:300] for i in hits))
+          man = Path("manifest.log")
+          if man.exists():
+              parts.append("===== merged manifest =====\n" + man.read_text(errors="replace")[:3000])
+          ent = Path("apk_entries.log")
+          if ent.exists():
+              parts.append("===== apk entries =====\n" + ent.read_text(errors="replace")[:2000])
+          text = "\n".join(parts) or "no diagnostics"
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for i in range(0, min(len(text), 24000), 3400):
+              print("::warning title=CloudHub startup::" + text[i:i + 3400])
+          PY
 
       - name: Publish failure diagnostics
         if: failure()
@@ -168,7 +230,7 @@ jobs:
           keys = ("e: ", "FAILURE:", "What went wrong", "Execution failed", "Caused by:",
                   "Unresolved reference", "None of the following", "Type mismatch",
                   "error:", "A problem occurred", "> Task ")
-          for name in ["probe.log", "sdk.log", "build.log"]:
+          for name in ["probe.log", "sdk.log", "smoke.log", "manifest.log", "apk_entries.log", "build.log"]:
               f = Path(name)
               if not f.exists():
                   continue
