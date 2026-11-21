@@ -118,9 +118,18 @@ fun CloudHubTheme(content: @Composable () -> Unit) {
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
-            window.statusBarColor = Color.Transparent.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
+            // view.context 可能是 ContextThemeWrapper，不能直接强转 Activity
+            runCatching {
+                var c = view.context
+                while (c is android.content.ContextWrapper && c !is Activity) {
+                    c = c.baseContext
+                }
+                if (c is Activity) {
+                    val window = c.window
+                    window.statusBarColor = Color.Transparent.toArgb()
+                    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
+                }
+            }
         }
     }
 

@@ -4,6 +4,9 @@ import android.app.Application
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
+import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
 
 class Store(private val ctx: Context) {
     private val sp = ctx.getSharedPreferences("cloudhub_drive_v1", Context.MODE_PRIVATE)
@@ -44,6 +47,30 @@ class DriveApp : Application() {
         super.onCreate()
         instance = this
         store = Store(this)
+        installCrashHandler()
+    }
+
+    private fun installCrashHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val sw = StringWriter()
+                error.printStackTrace(PrintWriter(sw))
+                File(filesDir, "crash.log").writeText(
+                    "thread=" + thread.name + "\ntime=" + System.currentTimeMillis() +
+                        "\n" + sw.toString()
+                )
+            }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
+    fun crashLog(): String = runCatching {
+        File(filesDir, "crash.log").takeIf { it.exists() }?.readText().orEmpty()
+    }.getOrDefault("")
+
+    fun clearCrashLog() {
+        runCatching { File(filesDir, "crash.log").delete() }
     }
 
     companion object {
