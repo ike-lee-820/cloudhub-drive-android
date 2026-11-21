@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -19,6 +21,8 @@ import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import com.cloudhub.drive.core.AppGraph
 import com.cloudhub.drive.core.Node
+import com.cloudhub.drive.core.UpdateInfo
+import com.cloudhub.drive.core.Updater
 import com.cloudhub.drive.ui.AppBottomBar
 import com.cloudhub.drive.ui.CloudHubTheme
 import com.cloudhub.drive.ui.FilesScreen
@@ -27,8 +31,10 @@ import com.cloudhub.drive.ui.PreviewScreen
 import com.cloudhub.drive.ui.SettingsScreen
 import com.cloudhub.drive.ui.SharesScreen
 import com.cloudhub.drive.ui.TasksScreen
+import com.cloudhub.drive.ui.UpdateDialog
 import com.cloudhub.drive.ui.WebPageScreen
 import com.cloudhub.drive.ui.appBackground
+import kotlinx.coroutines.launch
 
 data class PreviewArgs(val node: Node, val editable: Boolean)
 data class WebArgs(val url: String, val title: String)
@@ -47,10 +53,42 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun RootShell() {
     val s by AppGraph.settingsFlow.collectAsState()
+    val scope = rememberCoroutineScope()
+    val currentVersion = BuildConfig.VERSION_NAME
+
     var authed by remember { mutableStateOf(AppGraph.store.token.isNotBlank()) }
     var tab by remember { mutableStateOf(0) }
     var preview by remember { mutableStateOf<PreviewArgs?>(null) }
     var web by remember { mutableStateOf<WebArgs?>(null) }
+
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    var showUpdate by remember { mutableStateOf(false) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var updateMessage by remember { mutableStateOf("") }
+
+    fun checkUpdate(manual: Boolean) {
+        if (checkingUpdate) return
+        checkingUpdate = true
+        if (manual) updateMessage = ""
+        scope.launch {
+            val r = Updater.check(currentVersion)
+            checkingUpdate = false
+            r.onSuccess { info ->
+                if (info == null) {
+                    if (manual) updateMessage = "已是最新版本 $currentVersion"
+                } else {
+                    updateInfo = info
+                    showUpdate = true
+                }
+            }.onFailure { e ->
+                if (manual) updateMessage = "检查失败：${e.message}"
+            }
+        }
+    }
+
+    LaunchedEffect(authed) {
+        if (authed) checkUpdate(false)
+    }
 
     Box(Modifier.fillMaxSize().then(appBackground(s))) {
         if (s.bgMode == "image" && s.bgValue.isNotBlank()) {
@@ -86,7 +124,11 @@ private fun RootShell() {
                                 AppGraph.store.logout()
                                 authed = false
                                 tab = 0
-                            }
+                            },
+                            currentVersion = currentVersion,
+                            onCheckUpdate = { checkUpdate(true) },
+                            checkingUpdate = checkingUpdate,
+                            updateMessage = updateMessage
                         )
                     }
                 }
@@ -98,6 +140,12 @@ private fun RootShell() {
         }
         web?.let { args ->
             WebPageScreen(url = args.url, title = args.title, onClose = { web = null })
+        }
+    }
+
+    if (showUpdate) {
+        updateInfo?.let { info ->
+            UpdateDialog(info = info, onDismiss = { showUpdate = false })
         }
     }
 }

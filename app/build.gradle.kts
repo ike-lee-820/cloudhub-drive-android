@@ -3,6 +3,19 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// 版本号规则：年.月.次数，例如 26.11.1
+// CI 通过 -PappVersionName=26.11.N 注入；本地默认 26.11.1
+val appVersionName: String =
+    (project.findProperty("appVersionName") as String?)
+        ?: System.getenv("APP_VERSION_NAME")
+        ?: "26.11.1"
+
+val versionParts = appVersionName.split(".").mapNotNull { it.toIntOrNull() }
+val appVersionCode: Int =
+    (versionParts.getOrElse(0) { 26 } * 10000) +
+        (versionParts.getOrElse(1) { 11 } * 100) +
+        versionParts.getOrElse(2) { 1 }
+
 android {
     namespace = "com.cloudhub.drive"
     compileSdk = 34
@@ -11,8 +24,21 @@ android {
         applicationId = "com.cloudhub.drive"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
+    }
+
+    signingConfigs {
+        // CI 从 Secrets 解码 keystore.jks 到 app/ 目录；本地无文件时回退 debug 签名
+        create("release") {
+            val ks = file("keystore.jks")
+            if (ks.exists()) {
+                storeFile = ks
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "cloudhub2026"
+                keyAlias = System.getenv("KEY_ALIAS") ?: "cloudhub"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: "cloudhub2026"
+            }
+        }
     }
 
     buildTypes {
@@ -21,12 +47,18 @@ android {
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            isShrinkResources = false
+            signingConfig = if (file("keystore.jks").exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"

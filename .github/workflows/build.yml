@@ -1,10 +1,7 @@
-name: Android Build
+name: Android Release
 
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -13,8 +10,8 @@ permissions:
   checks: write
 
 jobs:
-  build:
-    name: Build debug APK
+  release:
+    name: Build and publish release APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,9 +23,43 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Compute version (year.month.count)
+        id: ver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import datetime, json, os, re, urllib.request
+
+          now = datetime.datetime.now(datetime.timezone.utc)
+          prefix = "v%02d.%02d." % (now.year % 100, now.month)
+          tags = []
+          try:
+              req = urllib.request.Request(
+                  "https://api.github.com/repos/${{ github.repository }}/tags?per_page=100",
+                  headers={
+                      "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "cloudhub-release-ci",
+                  },
+              )
+              tags = json.load(urllib.request.urlopen(req, timeout=20))
+          except Exception:
+              tags = []
+
+          nums = []
+          for t in tags:
+              m = re.match(r"^" + re.escape(prefix) + r"(\d+)$", t.get("name", ""))
+              if m:
+                  nums.append(int(m.group(1)))
+          n = max(nums) + 1 if nums else 1
+          version = "%02d.%02d.%d" % (now.year % 100, now.month, n)
+          print("version=" + version)
+          print("tag=" + prefix + str(n))
+          PY
+
       - name: Locate Android SDK tools
         run: |
-          set -o pipefail
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           MGR=$(find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -1)
           {
@@ -61,31 +92,60 @@ jobs:
           yes | "$MGR" --licenses > sdk-licenses.log 2>&1 || true
           "$MGR" "platforms;android-34" "build-tools;34.0.0" "platform-tools" 2>&1 | tee -a sdk.log
 
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "KEYSTORE_BASE64 secret 未配置" >&2
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > app/keystore.jks
+          test -s app/keystore.jks
+
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Verify Gradle
-        run: chmod +x gradlew && ./gradlew --version 2>&1 | tee gradle-version.log
-
-      - name: Assemble debug APK
+      - name: Assemble signed release APK
+        env:
+          APP_VERSION_NAME: ${{ steps.ver.outputs.version }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace \
+            -PappVersionName="${{ steps.ver.outputs.version }}" 2>&1 | tee build.log
+
+      - name: Prepare release asset
+        run: |
+          mkdir -p dist
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          cp "$APK" "dist/CloudHubDrive-${{ steps.ver.outputs.version }}-release.apk"
+          ls -l dist
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cloudhub-drive-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: cloudhub-drive-release-apk
+          path: dist/*.apk
           if-no-files-found: error
 
-      - name: Attach APK to tagged release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/app-debug.apk
-          name: CloudHub Drive ${{ github.ref_name }}
-          body: Automated debug build produced by Android Build workflow.
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: 云枢网盘 ${{ steps.ver.outputs.version }}
+          body: |
+            云枢网盘 Android 客户端 ${{ steps.ver.outputs.version }}
+
+            - Release 签名，可直接覆盖安装
+            - 应用内「设置 - 软件更新」自动检查 GitHub Release
+            - 经 v6.gh-proxy.com 加速，64 线程分段下载并安装
+          files: dist/*.apk
+          draft: false
+          prerelease: false
 
       - name: Upload build logs
         if: always()
@@ -96,7 +156,6 @@ jobs:
             probe.log
             sdk.log
             sdk-licenses.log
-            gradle-version.log
             build.log
           if-no-files-found: ignore
 
@@ -108,8 +167,8 @@ jobs:
           parts = []
           keys = ("e: ", "FAILURE:", "What went wrong", "Execution failed", "Caused by:",
                   "Unresolved reference", "None of the following", "Type mismatch",
-                  "error:", "A problem occurred", "> Task ", "Deprecated")
-          for name in ["probe.log", "sdk.log", "gradle-version.log", "build.log"]:
+                  "error:", "A problem occurred", "> Task ")
+          for name in ["probe.log", "sdk.log", "build.log"]:
               f = Path(name)
               if not f.exists():
                   continue

@@ -63,7 +63,11 @@ private fun parseColor(value: String): Color =
 @Composable
 fun SettingsScreen(
     onWeb: (String, String) -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    currentVersion: String,
+    onCheckUpdate: () -> Unit,
+    checkingUpdate: Boolean,
+    updateMessage: String
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -239,6 +243,42 @@ fun SettingsScreen(
                 "按 owner、repo 与账号序号删除",
                 onClick = { repoDelete = true },
                 icon = CommonIcons.Delete
+            )
+        }
+
+        GroupCard("软件更新") {
+            SettingRow(
+                "当前版本",
+                "$currentVersion · Release 签名",
+                icon = CommonIcons.Info
+            )
+            SettingRow(
+                "检查更新",
+                "从 GitHub Release 自动获取新版本，经 v6.gh-proxy.com 加速，64 线程分段下载后安装",
+                onClick = onCheckUpdate,
+                icon = CommonIcons.Refresh
+            )
+            if (checkingUpdate) {
+                Text("正在检查更新…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (updateMessage.isNotBlank()) {
+                Text(
+                    updateMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (updateMessage.startsWith("检查失败")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                )
+            }
+            SettingRow(
+                "加速节点",
+                com.cloudhub.drive.core.Updater.accelerated("https://github.com/ike-lee-820/cloudhub-drive-android/releases/latest"),
+                onClick = {
+                    Util.copy(
+                        ctx,
+                        "加速地址",
+                        com.cloudhub.drive.core.Updater.accelerated("https://github.com/ike-lee-820/cloudhub-drive-android/releases/latest")
+                    )
+                },
+                icon = CommonIcons.Link
             )
         }
 
