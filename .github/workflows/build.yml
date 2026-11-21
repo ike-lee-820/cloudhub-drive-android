@@ -30,14 +30,13 @@ jobs:
         run: |
           set -o pipefail
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          MGR=$(find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -1)
           {
             echo "SDK=$SDK"
-            echo "platforms:"; ls "$SDK/platforms" 2>&1 | tr '\n' ' '; echo
-            echo "build-tools:"; ls "$SDK/build-tools" 2>&1 | tr '\n' ' '; echo
-            MGR=$(find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -1)
+            echo "platforms: $(ls "$SDK/platforms" 2>&1 | tr '\n' ' ')"
+            echo "build-tools: $(ls "$SDK/build-tools" 2>&1 | tr '\n' ' ')"
             echo "sdkmanager=$MGR"
           } | tee probe.log
-          MGR=$(find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -1)
           if [ -n "$MGR" ]; then
             dirname "$MGR" >> "$GITHUB_PATH"
             echo "SDKMANAGER=$MGR" >> "$GITHUB_ENV"
@@ -88,17 +87,43 @@ jobs:
           name: CloudHub Drive ${{ github.ref_name }}
           body: Automated debug build produced by Android Build workflow.
 
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            probe.log
+            sdk.log
+            sdk-licenses.log
+            gradle-version.log
+            build.log
+          if-no-files-found: ignore
+
       - name: Publish failure diagnostics
         if: failure()
         run: |
           python3 - <<'PY'
           from pathlib import Path
           parts = []
-          for name in ["probe.log", "sdk-licenses.log", "sdk.log", "gradle-version.log", "build.log"]:
+          keys = ("e: ", "FAILURE:", "What went wrong", "Execution failed", "Caused by:",
+                  "Unresolved reference", "None of the following", "Type mismatch",
+                  "error:", "A problem occurred", "> Task ", "Deprecated")
+          for name in ["probe.log", "sdk.log", "gradle-version.log", "build.log"]:
               f = Path(name)
-              if f.exists():
-                  parts.append("===== " + name + " =====\n" + f.read_text(errors="replace")[-12000:])
+              if not f.exists():
+                  continue
+              lines = f.read_text(errors="replace").splitlines()
+              if name == "build.log":
+                  idx = sorted({j for i, l in enumerate(lines)
+                                if any(k in l for k in keys)
+                                for j in range(max(0, i - 1), min(len(lines), i + 3))})
+                  body = "\n".join(lines[i][:280] for i in idx)
+              else:
+                  body = "\n".join(lines)[-1200:]
+              parts.append("===== " + name + " =====\n" + body)
           text = "\n".join(parts) or "no logs captured"
           text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print("::error title=CloudHub CI diagnostics::" + text[:60000])
+          for i in range(0, min(len(text), 28000), 3400):
+              print("::error title=CloudHub CI diagnostics::" + text[i:i + 3400])
           PY
