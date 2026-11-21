@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  checks: write
 
 jobs:
   build:
@@ -25,23 +26,34 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Probe Android SDK
+        run: |
+          {
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+            echo "PATH sdkmanager: $(command -v sdkmanager || echo missing)"
+            ls -la "$ANDROID_HOME" 2>&1 | head -30
+            sdkmanager --version 2>&1 || true
+          } | tee probe.log
 
       - name: Accept Android licenses
-        run: yes | sdkmanager --licenses > /dev/null || true
+        run: yes | sdkmanager --licenses > sdk-licenses.log 2>&1 || true
 
       - name: Install SDK packages
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" > /dev/null
+        run: |
+          set -o pipefail
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" 2>&1 | tee sdk.log
 
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
       - name: Verify Gradle
-        run: chmod +x gradlew && ./gradlew --version
+        run: chmod +x gradlew && ./gradlew --version 2>&1 | tee gradle-version.log
 
       - name: Assemble debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -57,3 +69,18 @@ jobs:
           files: app/build/outputs/apk/debug/app-debug.apk
           name: CloudHub Drive ${{ github.ref_name }}
           body: Automated debug build produced by Android Build workflow.
+
+      - name: Publish failure diagnostics
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          parts = []
+          for name in ["probe.log", "sdk-licenses.log", "sdk.log", "gradle-version.log", "build.log"]:
+              f = Path(name)
+              if f.exists():
+                  parts.append("===== " + name + " =====\n" + f.read_text(errors="replace")[-12000:])
+          text = "\n".join(parts) or "no logs captured"
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print("::error title=CloudHub CI diagnostics::" + text[:60000])
+          PY
