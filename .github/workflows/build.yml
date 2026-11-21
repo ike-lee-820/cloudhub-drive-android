@@ -21,28 +21,46 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Probe Android SDK
-        run: |
-          {
-            echo "ANDROID_HOME=$ANDROID_HOME"
-            echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-            echo "PATH sdkmanager: $(command -v sdkmanager || echo missing)"
-            ls -la "$ANDROID_HOME" 2>&1 | head -30
-            sdkmanager --version 2>&1 || true
-          } | tee probe.log
-
-      - name: Accept Android licenses
-        run: yes | sdkmanager --licenses > sdk-licenses.log 2>&1 || true
-
-      - name: Install SDK packages
+      - name: Locate Android SDK tools
         run: |
           set -o pipefail
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" 2>&1 | tee sdk.log
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          {
+            echo "SDK=$SDK"
+            echo "platforms:"; ls "$SDK/platforms" 2>&1 | tr '\n' ' '; echo
+            echo "build-tools:"; ls "$SDK/build-tools" 2>&1 | tr '\n' ' '; echo
+            MGR=$(find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -1)
+            echo "sdkmanager=$MGR"
+          } | tee probe.log
+          MGR=$(find "$SDK/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -1)
+          if [ -n "$MGR" ]; then
+            dirname "$MGR" >> "$GITHUB_PATH"
+            echo "SDKMANAGER=$MGR" >> "$GITHUB_ENV"
+          fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+      - name: Install SDK packages if needed
+        run: |
+          set -o pipefail
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          MGR="${SDKMANAGER:-$(command -v sdkmanager || true)}"
+          echo "manager=$MGR" | tee sdk.log
+          if [ -d "$SDK/platforms/android-34" ] && [ -d "$SDK/build-tools/34.0.0" ]; then
+            echo "Required SDK packages already present" | tee -a sdk.log
+            exit 0
+          fi
+          if [ -z "$MGR" ] || [ ! -f "$MGR" ]; then
+            echo "sdkmanager unavailable" | tee -a sdk.log
+            exit 1
+          fi
+          yes | "$MGR" --licenses > sdk-licenses.log 2>&1 || true
+          "$MGR" "platforms;android-34" "build-tools;34.0.0" "platform-tools" 2>&1 | tee -a sdk.log
 
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4

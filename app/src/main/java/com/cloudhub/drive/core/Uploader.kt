@@ -316,7 +316,7 @@ class Uploader(
                 .header("X-GitHub-Api-Version", cfg.apiVersion)
                 .build()
             val call = client.newCall(request)
-            val list = calls.computeIfAbsent(taskId) { CopyOnWriteArrayList() }
+            val list = calls.computeIfAbsent(taskId) { CopyOnWriteArrayList<Call>() }
             list.add(call)
             try {
                 call.execute().use { resp ->

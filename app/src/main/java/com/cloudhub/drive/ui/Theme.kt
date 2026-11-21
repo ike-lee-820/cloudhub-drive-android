@@ -38,6 +38,24 @@ fun accentColor(value: String): Color = rememberAccent(value)
 private fun rememberAccent(value: String): Color =
     runCatching { Color(AndroidColor.parseColor(value)) }.getOrDefault(FallbackAccent)
 
+private fun Typography.withFamily(family: FontFamily): Typography = copy(
+    displayLarge = displayLarge.copy(fontFamily = family),
+    displayMedium = displayMedium.copy(fontFamily = family),
+    displaySmall = displaySmall.copy(fontFamily = family),
+    headlineLarge = headlineLarge.copy(fontFamily = family),
+    headlineMedium = headlineMedium.copy(fontFamily = family),
+    headlineSmall = headlineSmall.copy(fontFamily = family),
+    titleLarge = titleLarge.copy(fontFamily = family),
+    titleMedium = titleMedium.copy(fontFamily = family),
+    titleSmall = titleSmall.copy(fontFamily = family),
+    bodyLarge = bodyLarge.copy(fontFamily = family),
+    bodyMedium = bodyMedium.copy(fontFamily = family),
+    bodySmall = bodySmall.copy(fontFamily = family),
+    labelLarge = labelLarge.copy(fontFamily = family),
+    labelMedium = labelMedium.copy(fontFamily = family),
+    labelSmall = labelSmall.copy(fontFamily = family)
+)
+
 private fun resolveTypeface(ctx: Context, s: AppSettings): Typeface? {
     val local = AppGraph.store.localFontPath
     if (!local.isNullOrBlank()) {
@@ -93,8 +111,8 @@ fun CloudHubTheme(content: @Composable () -> Unit) {
         value = withContext(Dispatchers.IO) { resolveTypeface(ctx, s) }
     }
     val typography = remember(typeface) {
-        val family = typeface?.let { FontFamily(it) } ?: FontFamily.Default
-        Typography(defaultFontFamily = family)
+        val tf = typeface ?: return@remember Typography()
+        Typography().withFamily(FontFamily(tf))
     }
 
     val view = LocalView.current
