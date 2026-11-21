@@ -215,9 +215,13 @@ jobs:
           ent = Path("apk_entries.log")
           if ent.exists():
               parts.append("===== apk entries =====\n" + ent.read_text(errors="replace")[:2000])
+          import glob
+          for p in glob.glob("app/build/test-results/testDebugUnitTest/*.xml"):
+              body = Path(p).read_text(errors="replace")
+              parts.append("===== test result " + Path(p).name + " =====\n" + body[:9000])
           text = "\n".join(parts) or "no diagnostics"
           text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          for i in range(0, min(len(text), 24000), 3400):
+          for i in range(0, min(len(text), 42000), 3400):
               print("::warning title=CloudHub startup::" + text[i:i + 3400])
           PY
 
