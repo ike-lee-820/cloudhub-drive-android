@@ -15,7 +15,7 @@ class StartupSmokeTest {
 
     @Test
     fun applicationCreatesWithoutCrashing() {
-        val app = RuntimeEnvironment.getApplication<DriveApp>()
+        val app = RuntimeEnvironment.getApplication() as DriveApp
         assertNotNull(app)
         assertNotNull(app.store)
     }
